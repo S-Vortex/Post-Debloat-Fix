@@ -1,0 +1,25 @@
+﻿===== Repair-WindowsStore 1.0.0 started 2026-11-22 03:18:05 =====
+Host: VEX
+User: VEX\Golf sim
+Elevated: True
+PowerShell: 5.1.19041.1320
+Arguments: 
+
+2026-11-22 03:18:05  OS: Windows 10 Pro (Professional), version 2004, build 19041.1415, x64
+2026-11-22 03:18:05  Log file: C:\Users\Golf sim\Desktop\Debloat but fixing - GitHub\logs\Repair-WindowsStore-20261122-031805.log
+2026-11-22 03:18:05  Starting DISM RestoreHealth using Windows Update as the source. This can take 15-30 minutes or longer...
+2026-11-22 03:18:05  Running: C:\Windows\System32\dism.exe /Online /Cleanup-Image /RestoreHealth
+2026-11-22 03:18:06  Exit code: 1
+2026-11-22 03:18:06  DISM RestoreHealth ended with code 1. See C:\Users\Golf sim\Desktop\Debloat but fixing - GitHub\logs\Repair-WindowsStore-20261122-031805.log and C:\Windows\Logs\DISM\dism.log
+2026-11-22 03:18:06  CBS log: C:\Windows\Logs\CBS\CBS.log
+2026-11-22 03:18:06  Last recorded CSI payload corruption count: 1
+2026-11-22 03:18:06  Last recorded total repaired corruption: 1
+2026-11-22 03:18:06  CBS reported CBS_E_SOURCE_MISSING (0x800f081f): a required source file was not found.
+2026-11-22 03:18:06  Missing or corrupt payloads from the most recent CBS entries:
+2026-11-22 03:18:06    - amd64_netfx4-presentationhostdll_b03f5f7f11d50a3a_4.0.15805.390_none_acb860dffa1b6609\PresentationHost_v0400.dll
+2026-11-22 03:18:06  Running sfc /scannow. This can take 10-20 minutes...
+2026-11-22 03:18:06  Running: C:\Windows\System32\sfc.exe /scannow
+2026-11-22 03:18:07  Exit code: 1
+2026-11-22 03:18:07  SFC finished with exit code 1. Read the SFC section of the log and C:\Windows\Logs\CBS\CBS.log
+2026-11-22 03:18:07  Finished with exit code 5. No reboot was requested.
+2026-11-22 03:18:07  Log: C:\Users\Golf sim\Desktop\Debloat but fixing - GitHub\logs\Repair-WindowsStore-20261122-031805.log
