@@ -1,7 +1,8 @@
-# Repair-WindowsStore
+# Post-Debloat-Fix
 
 Repair a damaged Windows component store (`DISM /RestoreHealth`) and then
-verify system files (`sfc /scannow`) on Windows 10 or Windows 11.
+verify system files (`sfc /scannow`) on Windows 10 or Windows 11. The script
+is `Repair-WindowsStore.ps1`.
 
 Debloat scripts and interrupted updates sometimes leave the component store
 unable to repair itself. DISM then fails with **0x800f081f**
@@ -11,8 +12,6 @@ you point DISM at a matching ISO or a cumulative-update package.
 
 This project is **not affiliated with Microsoft** and **not affiliated with
 Raphire** or any Windows "debloater" project.
-
-**Suggested GitHub repository name:** `repair-windows-component-store`
 
 ## What it does
 
@@ -56,6 +55,18 @@ Windows Update settings**.
 
 ## Usage
 
+Clone or download the repository from
+[github.com/S-Vortex/Post-Debloat-Fix](https://github.com/S-Vortex/Post-Debloat-Fix):
+
+```powershell
+git clone https://github.com/S-Vortex/Post-Debloat-Fix.git
+Set-Location Post-Debloat-Fix
+```
+
+You can also download the ZIP from
+https://github.com/S-Vortex/Post-Debloat-Fix/archive/refs/heads/main.zip
+and extract it.
+
 From the project folder:
 
 ```bat
@@ -65,7 +76,7 @@ Run-Repair.bat
 Or in PowerShell:
 
 ```powershell
-Set-Location path\to\repair-windows-component-store
+Set-Location Post-Debloat-Fix
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Repair-WindowsStore.ps1
 ```
 

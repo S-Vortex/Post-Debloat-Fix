@@ -52,7 +52,7 @@
     .\Repair-WindowsStore.ps1 -SourcePath 'C:\Packages\windows10.0-kbXXXXXXXX-x64-ndp48.msu'
 
 .NOTES
-    Version 1.0.0
+    Version 1.0.1
     Requires PowerShell 5.1 or later and Windows 10 or 11.
     License: MIT
 #>
@@ -70,7 +70,7 @@ param(
 
 Set-StrictMode -Version 1
 $ErrorActionPreference = 'Continue'
-$script:Version = '1.0.0'
+$script:Version = '1.0.1'
 $script:LogPath = $null
 $script:WorkDir = $null
 $script:MountedIso = $null
@@ -215,6 +215,7 @@ function Get-CbsCorruptionReport {
         CorruptionCount  = $null
         RepairedCount    = $null
         LooksLikeNetFx   = $false
+        RepairedPayloads = @()
     }
 
     if (-not (Test-Path -LiteralPath $path)) {
@@ -222,7 +223,7 @@ function Get-CbsCorruptionReport {
     }
 
     try {
-        $hits = @(Select-String -LiteralPath $path -Pattern 'CSI Payload Corrupt|Add missing payload:|CBS_E_SOURCE_MISSING|Total Repaired Corruption:|CSI Payload Corruption:|CSI Payload Repaired:' -ErrorAction Stop)
+        $hits = @(Select-String -LiteralPath $path -Pattern 'CSI Payload Corrupt|Add missing payload:|CBS_E_SOURCE_MISSING|Total Repaired Corruption:|CSI Payload Corruption:|CSI Payload Repaired:|CheckSur:|Session:.*finalized|session\(Corruption Repairing\)' -ErrorAction Stop)
     } catch {
         $msg = [string]$_
         if ($msg -match 'denied|UnauthorizedAccess|Unauthorized') {
@@ -239,13 +240,27 @@ function Get-CbsCorruptionReport {
     # Typical line: amd64_netfx4-name_b03f5f7f11d50a3a_4.0.15805.390_none_acb860dffa1b6609\File.dll
     $compFile = [regex]'(?i)((?:amd64|x86|wow64|msil)_[A-Za-z0-9.\-]+_[0-9a-f]{16}_[0-9.]+_[A-Za-z0-9\-]+_[0-9a-f]+(?:\\[\w.\-]+)?)'
 
-    # Use the last 80 matching lines so we stay in the most recent repair session.
-    $window = $hits
-    if ($hits.Count -gt 80) {
-        $window = $hits[($hits.Count - 80)..($hits.Count - 1)]
+    # Use only the newest component-store repair session, not earlier failures
+    # still sitting in CBS.log. Session ends are "finalized", CheckSur, or
+    # "Total Repaired Corruption".
+    $endIdx = $hits.Count - 1
+    for ($i = $hits.Count - 1; $i -ge 0; $i--) {
+        if ($hits[$i].Line -match 'Total Repaired Corruption:|CheckSur:|Session:.*finalized|Exec: Processing complete, session\(Corruption Repairing\)') {
+            $endIdx = $i
+            break
+        }
     }
+    $startIdx = 0
+    for ($i = $endIdx - 1; $i -ge 0; $i--) {
+        if ($hits[$i].Line -match 'Session:.*finalized|Exec: Processing complete, session\(Corruption Repairing\)|CheckSur:') {
+            $startIdx = $i + 1
+            break
+        }
+    }
+    $window = $hits[$startIdx..$endIdx]
 
     $payloads = New-Object System.Collections.Generic.List[string]
+    $repairedPayloads = New-Object System.Collections.Generic.List[string]
     foreach ($hit in $window) {
         $line = $hit.Line
         if ($line -match 'CBS_E_SOURCE_MISSING') { $report.SourceMissing = $true }
@@ -255,16 +270,36 @@ function Get-CbsCorruptionReport {
         if ($line -match 'Total Repaired Corruption:\s+(\d+)') {
             $report.RepairedCount = [int]$Matches[1]
         }
+        if ($line -match 'HRESULT = 0x00000000' -or $line -match 'The restore operation completed successfully') {
+            $report.SourceMissing = $false
+        }
         if ($line -match 'CSI Payload Corrupt' -or $line -match 'Add missing payload:') {
             $m = $compFile.Match($line)
             if ($m.Success) {
                 $name = $m.Groups[1].Value.Trim()
-                if (-not $payloads.Contains($name)) { [void]$payloads.Add($name) }
+                $isFixed = ($line -match '\(Fixed\)' -or $line -match 'CSI Payload Repaired')
+                if ($isFixed) {
+                    if (-not $repairedPayloads.Contains($name)) { [void]$repairedPayloads.Add($name) }
+                    if ($payloads.Contains($name)) { [void]$payloads.Remove($name) }
+                } elseif (-not $payloads.Contains($name) -and -not $repairedPayloads.Contains($name)) {
+                    [void]$payloads.Add($name)
+                }
             }
         }
     }
 
+    # If the newest session reported a full repair, do not keep those payloads
+    # as still missing, and do not carry a source-missing flag forward.
+    if ($null -ne $report.RepairedCount -and $null -ne $report.CorruptionCount -and $report.RepairedCount -ge $report.CorruptionCount -and $report.CorruptionCount -ge 0) {
+        $report.SourceMissing = $false
+        foreach ($n in @($payloads)) {
+            if (-not $repairedPayloads.Contains($n)) { [void]$repairedPayloads.Add($n) }
+            [void]$payloads.Remove($n)
+        }
+    }
+
     $report.Payloads = @($payloads)
+    $report.RepairedPayloads = @($repairedPayloads)
     foreach ($p in $report.Payloads) {
         if ($p -match '(?i)netfx|ndp\d|NetFx4') { $report.LooksLikeNetFx = $true }
     }
@@ -284,23 +319,33 @@ function Write-CbsReport {
         return
     }
 
-    Write-Log "CBS log: $($Report.LogPath)" 'Gray'
+    Write-Log "CBS log: $($Report.LogPath) (newest repair session only)" 'Gray'
     if ($null -ne $Report.CorruptionCount) {
-        Write-Log ("Last recorded CSI payload corruption count: {0}" -f $Report.CorruptionCount)
+        Write-Log ("CSI payload corruption count (newest session): {0}" -f $Report.CorruptionCount)
     }
     if ($null -ne $Report.RepairedCount) {
-        Write-Log ("Last recorded total repaired corruption: {0}" -f $Report.RepairedCount)
+        Write-Log ("Total repaired corruption (newest session): {0}" -f $Report.RepairedCount)
+    }
+    if ($Report.PSObject.Properties['RepairedPayloads'] -and $Report.RepairedPayloads -and $Report.RepairedPayloads.Count -gt 0) {
+        Write-Log 'Payloads repaired in the newest session:' 'Green'
+        foreach ($p in $Report.RepairedPayloads) {
+            Write-Log ("  - {0}" -f $p) 'Green'
+        }
     }
     if ($Report.SourceMissing) {
-        Write-Log 'CBS reported CBS_E_SOURCE_MISSING (0x800f081f): a required source file was not found.' 'Yellow'
+        Write-Log 'The newest session reported CBS_E_SOURCE_MISSING (0x800f081f): a required source file was not found.' 'Yellow'
     }
     if ($Report.Payloads -and $Report.Payloads.Count -gt 0) {
-        Write-Log 'Missing or corrupt payloads from the most recent CBS entries:' 'Cyan'
+        Write-Log 'Missing or still-corrupt payloads in the newest session:' 'Cyan'
         foreach ($p in $Report.Payloads) {
             Write-Log ("  - {0}" -f $p) 'Yellow'
         }
-    } else {
-        Write-Log 'No CSI payload-corruption entries were found in the recent CBS log lines.'
+    } elseif (-not $Report.SourceMissing) {
+        if ($null -ne $Report.RepairedCount -and $Report.RepairedCount -gt 0) {
+            Write-Log 'The newest component-store session completed and has no remaining listed payload corruption.' 'Green'
+        } else {
+            Write-Log 'No CSI payload-corruption entries were found in the newest CBS repair session.'
+        }
     }
 }
 
@@ -386,31 +431,39 @@ function Invoke-LoggedCommand {
         [ValidateSet('OEM', 'Unicode', 'UTF8')]
         [string]$OutputEncodingName = 'OEM'
     )
+    # Start the tool directly. Do not wrap it in "Start-Process cmd.exe /c ..." —
+    # PowerShell's Start-Process re-quotes an already-quoted command line, so
+    # cmd.exe never launches DISM or SFC and returns exit code 1 immediately.
     Write-Log ("Running: {0} {1}" -f $FilePath, $Arguments) 'Cyan'
-    $outFile = Join-Path $env:TEMP ('rws-out-{0}.txt' -f [guid]::NewGuid().ToString('N'))
-    $cmd = '"{0}" {1} > "{2}" 2>&1' -f $FilePath, $Arguments, $outFile
+    if ($OutputEncodingName) { } # kept for callers; output goes to this console
+    if (-not (Test-Path -LiteralPath $FilePath)) {
+        Write-Log "Executable not found: $FilePath" 'Red'
+        return 1
+    }
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FilePath
+    $psi.Arguments = $Arguments
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $false
+    $psi.RedirectStandardError = $false
+    $psi.CreateNoWindow = $false
+    $dir = Split-Path -Parent $FilePath
+    if ($dir) { $psi.WorkingDirectory = $dir }
+
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
     try {
-        $proc = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', $cmd) -Wait -PassThru -WindowStyle Hidden
-        $enc = $OutputEncodingName
-        if (Test-Path -LiteralPath $outFile) {
-            # SFC writes UTF-16 LE (BOM). Prefer Unicode when a BOM is present.
-            $bytes = [System.IO.File]::ReadAllBytes($outFile)
-            if ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) {
-                $enc = 'Unicode'
-            }
-            $text = Get-Content -LiteralPath $outFile -Encoding $enc -ErrorAction SilentlyContinue
-            foreach ($line in $text) {
-                if ($null -eq $line) { continue }
-                $s = [string]$line
-                if ($s.Trim() -eq '') { continue }
-                if ($script:LogPath) { Add-Content -LiteralPath $script:LogPath -Value $s -Encoding UTF8 -WhatIf:$false -Confirm:$false }
-                Write-Host $s
-            }
-        }
-        Write-Log ("Exit code: {0}" -f $proc.ExitCode)
-        return [int]$proc.ExitCode
+        [void]$proc.Start()
+        $proc.WaitForExit()
+        $code = [int]$proc.ExitCode
+        Write-Log ("Exit code: {0}" -f $code)
+        return $code
+    } catch {
+        Write-Log "Failed to start ${FilePath}: $_" 'Red'
+        return 1
     } finally {
-        Remove-Item -LiteralPath $outFile -Force -ErrorAction SilentlyContinue
+        $proc.Dispose()
     }
 }
 

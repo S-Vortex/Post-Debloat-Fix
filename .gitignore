@@ -1,0 +1,21 @@
+# Logs and local working copies
+logs/
+work/
+temp/
+*.log
+
+# Windows images and Microsoft update packages (do not publish these)
+*.iso
+*.wim
+*.esd
+*.msu
+*.cab
+*.dll
+*.mui
+
+# Editor / OS noise
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.swp
+*~
